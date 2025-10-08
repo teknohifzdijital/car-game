@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sollamasız Sürüş Oyunu</title>
+    <title>Hileli Yüksek Hızlı Sürüş Oyunu</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
@@ -46,10 +46,10 @@
             border-top-left-radius: 12px;
             border-top-right-radius: 12px;
             z-index: 10;
-            pointer-events: none; /* HUD'ın tıklanmasını engeller */
+            pointer-events: none;
         }
         .speed-display {
-            color: #48bb78; /* Yeşil hız göstergesi */
+            color: #48bb78;
         }
         .controls {
             padding: 10px;
@@ -71,6 +71,8 @@
             border: none;
             box-shadow: 0 4px #1a202c;
             user-select: none;
+            flex-grow: 1;
+            max-width: 120px;
         }
         .control-button:active {
             box-shadow: 0 2px #1a202c;
@@ -78,6 +80,10 @@
         }
         .left-button { background-color: #3182ce; }
         .right-button { background-color: #dd6b20; }
+        .pause-button { 
+            background-color: #9f7aea; /* Mor */
+            box-shadow: 0 4px #6b46c1;
+        }
 
         #message-box {
             position: absolute;
@@ -114,12 +120,13 @@
     <canvas id="gameCanvas"></canvas>
     <div class="controls">
         <button id="leftBtn" class="control-button left-button">SOL</button>
+        <button id="pauseBtn" class="control-button pause-button">DURDUR</button>
         <button id="rightBtn" class="control-button right-button">SAĞ</button>
     </div>
 
     <div id="message-box">
-        <h2 class="text-xl font-bold mb-2">ÇARPIŞMA!</h2>
-        <p>Trafik çok yoğundu. Tekrar denemek için Oyna'ya basın.</p>
+        <h2 id="message-title" class="text-xl font-bold mb-2">ÇARPIŞMA!</h2>
+        <p id="message-text">Trafik çok yoğundu. Tekrar denemek için Oyna'ya basın.</p>
         <button id="restartBtn">Tekrar Oyna</button>
     </div>
 </div>
@@ -131,20 +138,31 @@
     const scoreDisplay = document.getElementById('score-display');
     const speedIndicator = document.getElementById('speed-indicator');
     const messageBox = document.getElementById('message-box');
+    const messageTitle = document.getElementById('message-title');
+    const messageText = document.getElementById('message-text');
     const restartBtn = document.getElementById('restartBtn');
     const leftBtn = document.getElementById('leftBtn');
     const rightBtn = document.getElementById('rightBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
 
     // Oyun ayarları
     let game;
-    const ROAD_WIDTH_RATIO = 0.8; // Yolun genişliği
+    const ROAD_WIDTH_RATIO = 0.8;
     const CAR_WIDTH = 40;
     const CAR_HEIGHT = 80;
-    const PLAYER_SPEED_X = 5; // Yatay hareket hızı
-    const NPC_BASE_SPEED = 8; // NPC'lerin temel kayma hızı (Yolun hızı)
-    const NPC_LANE_SPEED_FACTOR = 0.7; // NPC'ler yolda %70 hızla gitsin (daha yavaş görünmeleri için)
-    const SCORE_MULTIPLIER = 0.1; // Skor artış hızı
-    const MAX_NPC_SPAWN_INTERVAL = 30; // NPC'lerin sıklaşması (daha az = daha sık)
+    const PLAYER_SPEED_X = 5; 
+    const NPC_BASE_SPEED = 8; 
+    const NPC_LANE_SPEED_FACTOR = 0.7;
+    const SCORE_MULTIPLIER = 0.1;
+    const MAX_NPC_SPAWN_INTERVAL = 30;
+
+    // Konami Kodu Tanımı (Yukarı, Yukarı, Aşağı, Aşağı, Sol, Sol, Sağ, Sağ, B, A)
+    const KONAMI_CODE = [
+        'ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 
+        'ArrowLeft', 'ArrowLeft', 'ArrowRight', 'ArrowRight', 
+        'b', 'a'
+    ];
+    let konamiCodeIndex = 0;
 
     class PlayerCar {
         constructor() {
@@ -152,7 +170,7 @@
             this.height = CAR_HEIGHT;
             this.x = canvas.width / 2 - this.width / 2;
             this.y = canvas.height - this.height - 50;
-            this.color = '#f56565'; // Kırmızı oyuncu arabası
+            this.color = '#f56565';
         }
 
         update() {
@@ -164,7 +182,7 @@
         draw() {
             ctx.fillStyle = this.color;
             ctx.fillRect(this.x, this.y, this.width, this.height);
-            // Üçgen tavan çizimi (daha araba benzeri görünmesi için)
+            // Üçgen tavan çizimi
             ctx.beginPath();
             ctx.moveTo(this.x, this.y + this.height * 0.2);
             ctx.lineTo(this.x + this.width, this.y + this.height * 0.2);
@@ -175,7 +193,7 @@
         }
 
         move(direction) {
-            this.x += direction * PLAYER_SPEED_X * 10; // Hızlı şerit değiştirme
+            this.x += direction * PLAYER_SPEED_X * 10;
         }
     }
 
@@ -186,12 +204,11 @@
             this.x = x;
             this.y = y;
             this.color = color;
-            // NPC'ler yavaş hareket etmeli (kullanıcı isteği)
             this.speed = NPC_BASE_SPEED * NPC_LANE_SPEED_FACTOR;
         }
 
         update(speedFactor) {
-            // NPC'ler aşağı doğru hareket eder (yolun hızı + NPC'nin kendi yavaş hızı)
+            // speedFactor, roadSpeed'den geliyor.
             this.y += speedFactor + (NPC_BASE_SPEED - this.speed);
         }
 
@@ -235,11 +252,12 @@
             this.score = 0;
             this.npcTimer = 0;
             this.roadSpeed = NPC_BASE_SPEED; // Yolun hareket hızı
-            
+            this.MAX_VISUAL_SPEED = 600; // Başlangıçta 600 km/s gösterir
+            this.cheatActive = false; // Hile aktif mi?
+
             this.roadW = canvas.width * ROAD_WIDTH_RATIO;
             this.roadX = (canvas.width - this.roadW) / 2;
-
-            this.laneCount = 3; // 3 şeritli yol
+            this.laneCount = 4; // 4 şeritli yol (Önceki istekten)
             this.laneWidth = this.roadW / this.laneCount;
 
             this.npcColors = ['#4299e1', '#d53f8c', '#ecc94b', '#38b2ac', '#ed8936'];
@@ -254,38 +272,77 @@
             this.npcTimer = 0;
             this.roadSpeed = NPC_BASE_SPEED;
             this.isRunning = true;
+            this.cheatActive = false; // Hile sıfırlanır
+            this.MAX_VISUAL_SPEED = 600; 
+            speedIndicator.textContent = this.MAX_VISUAL_SPEED;
+            pauseBtn.textContent = 'DURDUR';
             messageBox.style.display = 'none';
+        }
+        
+        // Oyunu duraklat/başlat
+        togglePause() {
+            this.isRunning = !this.isRunning;
+            pauseBtn.textContent = this.isRunning ? 'DURDUR' : 'BAŞLAT';
+            if (!this.isRunning) {
+                this.showPauseMessage();
+            } else {
+                messageBox.style.display = 'none';
+                messageTitle.textContent = 'ÇARPIŞMA!'; // Eski başlığa geri dön
+            }
+        }
+        
+        showPauseMessage() {
+            messageTitle.textContent = 'DURAKLATILDI';
+            messageText.innerHTML = `Oyunu sürdürmek için BAŞLAT'a basın.
+                                     <br><br>Hile Kodu Deneyin: <span class="text-yellow-300">Yukarı, Yukarı, Aşağı, Aşağı, Sol, Sol, Sağ, Sağ, B, A</span>`;
+            messageBox.style.display = 'block';
+            // Tekrar Oyna butonunu gizle, sadece mesajı göster
+            restartBtn.style.display = 'none'; 
+        }
+        
+        activateCheat() {
+            if (this.cheatActive) return;
+            this.cheatActive = true;
+            this.MAX_VISUAL_SPEED = 20000;
+            speedIndicator.textContent = this.MAX_VISUAL_SPEED;
+            
+            messageTitle.textContent = 'HİLE AKTİF!';
+            messageText.innerHTML = `<span class="text-red-500 font-extrabold text-2xl">${this.MAX_VISUAL_SPEED} KM/H</span> Kilidi Açıldı! Oynamak için BAŞLAT'a basın.`;
+            
+            // Hile aktif olduktan sonra yol hızını artır
+            this.roadSpeed = NPC_BASE_SPEED * 2.5; // Yol hızını da biraz artır ki fark edilsin
         }
 
         initLines() {
             this.roadLines = [];
+            const laneLineXPositions = [];
+            // 4 şerit için 3 çizgi (1. şerit başlangıcı, 2. şerit başlangıcı, 3. şerit başlangıcı)
+            for (let j = 1; j < this.laneCount; j++) {
+                laneLineXPositions.push(this.roadX + j * this.laneWidth - 5);
+            }
+
             for (let i = -20; i < canvas.height / 50 + 2; i++) {
                 // Şerit çizgileri
-                for (let j = 1; j < this.laneCount; j++) {
-                    this.roadLines.push(new RoadLine(
-                        this.roadX + j * this.laneWidth - 5,
-                        i * 50,
-                        10, 30
-                    ));
+                for (const xPos of laneLineXPositions) {
+                    this.roadLines.push(new RoadLine(xPos, i * 50, 10, 30));
                 }
-                // Kenar çizgileri
+                // Kenar çizgileri (Yolun dışına bariyer görevi görüyor)
                 this.roadLines.push(new RoadLine(this.roadX - 5, i * 50, 5, 30));
                 this.roadLines.push(new RoadLine(this.roadX + this.roadW, i * 50, 5, 30));
             }
         }
 
         spawnNPC() {
-            // NPC'ler çok olsun (kullanıcı isteği) - daha sık spawn ediyoruz
             if (this.npcTimer >= MAX_NPC_SPAWN_INTERVAL) {
                 const laneIndex = Math.floor(Math.random() * this.laneCount);
                 
                 // Şerit x pozisyonunu hesapla
                 const xPos = this.roadX + laneIndex * this.laneWidth + (this.laneWidth / 2) - (CAR_WIDTH / 2);
                 
-                // Başka bir araba ile çakışma kontrolü (Basit bir kontrol)
-                const isClear = this.npcCars.every(car => car.y > 100);
+                // Başka bir araba ile çakışma kontrolü (Basit bir kontrol: ekranda çok yakın araba olmasın)
+                const isClear = this.npcCars.every(car => car.y > 150);
 
-                if (isClear) {
+                if (isClear || Math.random() < 0.1) { // %10 ihtimalle üst üste spawn et
                     const randomColor = this.npcColors[Math.floor(Math.random() * this.npcColors.length)];
                     this.npcCars.push(new NPCCar(xPos, -CAR_HEIGHT, randomColor));
                     this.npcTimer = 0;
@@ -295,14 +352,13 @@
         }
 
         checkCollision() {
-            // Basit AABB çarpışma kontrolü
             for (const npc of this.npcCars) {
                 if (this.player.x < npc.x + npc.width &&
                     this.player.x + this.player.width > npc.x &&
                     this.player.y < npc.y + npc.height &&
                     this.player.y + this.player.height > npc.y) {
                     
-                    this.isRunning = false; // Çarpışma oldu, oyunu durdur
+                    this.isRunning = false;
                     this.showGameOver();
                     return true;
                 }
@@ -313,13 +369,11 @@
         update() {
             if (!this.isRunning) return;
 
-            // Skoru güncelle (Sadece mesafe/zaman üzerinden, sollama yok)
             this.score += this.roadSpeed * SCORE_MULTIPLIER;
             scoreDisplay.textContent = Math.floor(this.score);
             
-            // Hız göstergesini güncelle (Görsel hız 600, gerçek hız roadSpeed)
-            // Kullanıcı isteğine uygun olarak hız göstergesini sabit 600 tutalım
-            speedIndicator.textContent = '600'; 
+            // Hız göstergesini güncelle (Hile aktifse 20000, değilse 600)
+            speedIndicator.textContent = this.MAX_VISUAL_SPEED;
             
             this.player.update();
             this.spawnNPC();
@@ -329,15 +383,19 @@
             this.roadLines.forEach(line => {
                 line.update(this.roadSpeed);
             });
-            // Yol çizgilerini tekrar oluştur (döngüsel kaydırma efekti)
+            
+            // Yol çizgilerini döngüsel olarak yeniden oluştur
             if (this.roadLines[0].y > 50) {
+                const laneLineXPositions = [];
                 for (let j = 1; j < this.laneCount; j++) {
-                    this.roadLines.unshift(new RoadLine(
-                        this.roadX + j * this.laneWidth - 5, 
-                        this.roadLines[0].y - 50, 
-                        10, 30
-                    ));
+                    laneLineXPositions.push(this.roadX + j * this.laneWidth - 5);
                 }
+                
+                // Yeni şerit çizgileri
+                for (const xPos of laneLineXPositions) {
+                    this.roadLines.unshift(new RoadLine(xPos, this.roadLines[0].y - 50, 10, 30));
+                }
+                // Yeni kenar çizgileri
                 this.roadLines.unshift(new RoadLine(this.roadX - 5, this.roadLines[0].y - 50, 5, 30));
                 this.roadLines.unshift(new RoadLine(this.roadX + this.roadW, this.roadLines[0].y - 50, 5, 30));
             }
@@ -356,8 +414,8 @@
             ctx.fillStyle = '#4a5568';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Yol Kenarları
-            ctx.fillStyle = '#31363e'; // Yol kenar rengi (asfalt dışı)
+            // Yol Kenarları (Bariyer Alanı)
+            ctx.fillStyle = '#31363e';
             ctx.fillRect(0, 0, this.roadX, canvas.height);
             ctx.fillRect(this.roadX + this.roadW, 0, canvas.width - (this.roadX + this.roadW), canvas.height);
 
@@ -372,21 +430,47 @@
         }
 
         showGameOver() {
+            messageTitle.textContent = 'ÇARPIŞMA!';
+            messageText.textContent = `Son Puanınız: ${Math.floor(this.score)}. Tekrar denemek için Oyna'ya basın.`;
             messageBox.style.display = 'block';
-            document.getElementById('message-box').querySelector('p').textContent = `Son Puanınız: ${Math.floor(this.score)}. Tekrar denemek için Oyna'ya basın.`;
+            restartBtn.style.display = 'inline-block';
         }
     }
 
+    // --- Hile Kodu Yönetimi ---
+    function checkKonamiCode(key) {
+        if (!game || game.isRunning) {
+            konamiCodeIndex = 0; // Oyun çalışıyorken hileyi sıfırla
+            return;
+        }
+
+        const expectedKey = KONAMI_CODE[konamiCodeIndex];
+        
+        // Hile kodunda harf kullanıldığı için key.toLowerCase() kullanıyoruz
+        if (key.toLowerCase() === expectedKey) {
+            konamiCodeIndex++;
+            if (konamiCodeIndex === KONAMI_CODE.length) {
+                game.activateCheat();
+                konamiCodeIndex = 0; // Hileyi girdikten sonra kodu sıfırla
+            }
+        } else {
+            // Yanlış tuş girildi, kodu sıfırla
+            konamiCodeIndex = 0;
+        }
+    }
+
+    // --- Başlatma ve Olay Dinleyicileri ---
+    
     function resizeCanvas() {
         const container = document.getElementById('game-container');
         canvas.width = container.clientWidth;
-        canvas.height = 600; // Sabit yükseklik
+        canvas.height = 600;
         if (game) {
             game.roadW = canvas.width * ROAD_WIDTH_RATIO;
             game.roadX = (canvas.width - game.roadW) / 2;
             game.laneWidth = game.roadW / game.laneCount;
             game.player.x = canvas.width / 2 - game.player.width / 2;
-            game.initLines(); // Çizgileri yeniden konumlandır
+            game.initLines();
         }
     }
 
@@ -395,12 +479,20 @@
         if (game.isRunning) {
             game.update();
             game.draw();
+        } else if (game) {
+            // Durdurulmuşsa sadece çizimi yap, hareket ettirme
+            game.draw();
         }
     }
 
-    // Olay Dinleyicileri
+    // Klavye kontrolleri
     document.addEventListener('keydown', (e) => {
+        // Hile kontrolü her zaman aktif olmalı (oyun duraklatılmışken)
+        checkKonamiCode(e.key);
+
         if (!game || !game.isRunning) return;
+
+        // Ok tuşları ve A/D ile ters atama düzeltildi
         if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') {
             game.player.move(-1);
         } else if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') {
@@ -409,30 +501,36 @@
     });
 
     // Mobil kontrol butonları
-    leftBtn.addEventListener('touchstart', () => { if (game.isRunning) game.player.move(-1); });
-    rightBtn.addEventListener('touchstart', () => { if (game.isRunning) game.player.move(1); });
-    
+    leftBtn.addEventListener('click', () => { if (game.isRunning) game.player.move(-1); });
+    rightBtn.addEventListener('click', () => { if (game.isRunning) game.player.move(1); });
+    // Mobil Dokunmatik desteği
+    leftBtn.addEventListener('touchstart', (e) => { e.preventDefault(); if (game.isRunning) game.player.move(-1); });
+    rightBtn.addEventListener('touchstart', (e) => { e.preventDefault(); if (game.isRunning) game.player.move(1); });
+
+
+    // Durdur/Başlat butonu
+    pauseBtn.addEventListener('click', () => {
+        if (game) {
+            game.togglePause();
+        }
+    });
+
+
     // Tekrar Oyna butonu
     restartBtn.addEventListener('click', () => {
         if (!game) {
             game = new Game();
-            game.reset();
-        } else {
-            game.reset();
         }
+        game.reset();
         gameLoop();
     });
-
+    
+    // Oyun yüklendiğinde
     window.onload = function () {
-        // İlk kurulum
         resizeCanvas();
         game = new Game();
         game.reset(); // Oyunu başlat
-
-        // Yeniden boyutlandırma olaylarını dinle
         window.addEventListener('resize', resizeCanvas);
-        
-        // Oyun döngüsünü başlat
         gameLoop();
     }
 </script>
