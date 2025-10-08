@@ -137,8 +137,8 @@
                 this.keyMap = {
                     'w': 'forward',
                     's': 'backward',
-                    'a': 'left',
-                    'd': 'right',
+                    'a': 'left', // A tuşu Sol Hareketi temsil eder
+                    'd': 'right', // D tuşu Sağ Hareketi temsil eder
                     ' ': 'handbrake'
                 };
                 window.addEventListener('keydown', this.onKeyChange.bind(this, 1));
@@ -175,11 +175,10 @@
                 // Zorluk, hız ve hassasiyet çarpanlarını ayarlar
                 this.difficulty = difficulty; 
                 
-                // Hız artırıldı: AI'lar artık 600 km/h'in %70'inden %90'ına kadar çıkabilir.
+                // Hız artırıldı: AI'lar artık maks. hızın %70'inden %90'ına kadar çıkabilir.
                 this.targetSpeedFactor = 0.7 + (difficulty * 0.2); 
                 
-                this.arrivalThreshold = 50; // Hedefe ne kadar yaklaştığında hedefi ileri taşıyacak
-                this.maxLookAhead = 30; // Etkisizleştirildi
+                this.arrivalThreshold = 50; 
                 this.aiInput = { forward: 0, backward: 0, left: 0, right: 0, handbrake: 0 };
             }
 
@@ -206,16 +205,12 @@
                 
                 // 2. Direksiyon Kontrolü (Düz Sürüş ve Şerit Koruma)
                 
-                // Mevcut X pozisyonuna bağlı olarak orta şeride dönmeye çalış
-                // AI aracını 0, -10, 10 gibi pozisyonlarda tutmaya çalış
+                // Mevcut X pozisyonuna bağlı olarak orta şeride (initialX) dönmeye çalış
                 const targetX = this.vehicle.mesh.userData.initialX || 0; // AI'nın başlangıç X konumu
                 const centerError = targetX - currentPos.x;
                 
-                // Orta şeride dönmeye çalışan direksiyon açısı
-                let steering = centerError * 0.05; 
-                
-                // Küçük rastgele değişim (daha doğal hareket)
-                steering += (Math.random() - 0.5) * 0.02 * this.difficulty;
+                // Orta şeride dönmeye çalışan direksiyon açısı (Düz sürüş için rastgele sapma kaldırıldı)
+                let steering = centerError * 0.08; // Daha agresif şerit düzeltme
                 
                 // Direksiyon açısı sınırlandırma
                 steering = Math.max(-1, Math.min(1, steering));
@@ -233,9 +228,8 @@
                 }
             }
             
-            // Düz yolda sollama durumu bir sonraki sollama için hemen sıfırlanabilir
             resetOvertakeStatus() {
-                // Bu metot artık kullanılmayacak, Game sınıfında anlık kontrol yapılacak
+                // Artık Game sınıfında anlık kontrol yapılıyor
             }
         }
 
@@ -247,7 +241,7 @@
          */
         class Vehicle {
             // carModelGroup, Game.CarModelGroup'dan gelen yüklü 3D model grubudur
-            constructor(scene, color = 0x00aaff, startPos = new THREE.Vector3(0, 0.6, 0), id = 'player', carModelGroup) {
+            constructor(scene, color = 0x00aaff, startPos = new THREE.Vector3(0, 0.3, 0), id = 'player', carModelGroup) {
                 this.scene = scene;
                 this.id = id;
                 
@@ -278,7 +272,8 @@
                     
                 } else {
                     // Model yüklenemediyse veya 'placeholder' ise yer tutucu BoxGeometry kullan
-                    const carGeometry = new THREE.BoxGeometry(2.5, 1, 5); // Genişlik, Yükseklik, Uzunluk
+                    // KÜÇÜK KUTU BOYUTU: 1.5 genişlik, 0.6 yükseklik, 3.0 uzunluk
+                    const carGeometry = new THREE.BoxGeometry(1.5, 0.6, 3.0); 
                     const carMaterial = new THREE.MeshPhongMaterial({ color: color, flatShading: true });
                     this.mesh = new THREE.Mesh(carGeometry, carMaterial);
                 }
@@ -318,7 +313,8 @@
                 if (this.speed < 0.05) this.speed = 0; // Çok yavaşsa durdur
 
                 // 4. Direksiyon Açısı
-                const targetSteering = (input.right - input.left) * this.maxSteeringAngle;
+                // FIX: Kullanıcının talebi üzerine sol/sağ girdisi ters çevrildi (A=Sol, D=Sağ)
+                const targetSteering = (input.left - input.right) * this.maxSteeringAngle;
                 // Yumuşak direksiyon geçişi
                 this.steeringAngle += (targetSteering - this.steeringAngle) * 5 * deltaTime;
 
@@ -338,21 +334,20 @@
                     this.mesh.position.add(displacement);
                 }
 
-                // 6. Basit Yerçekimi/Zemin Teması ve Yol Dışı Cezası (Şarampol)
-                this.mesh.position.y = 0.6; 
+                // 6. Basit Yerçekimi/Zemin Teması ve Yol Dışı Cezası (Bariyerler)
+                this.mesh.position.y = 0.3; 
                 
-                // Yol sınırları X: -15 ile X: 15 arası (Ana yol)
-                const roadBoundary = 15; 
-                const shoulderBoundary = 30; // Şarampol sınırları X: -30 ile X: 30 arası
+                // Yol sınırları X: -20 ile X: 20 arası (4 Şeritli Ana yol)
+                const roadBoundary = 20; 
+                const barrierBoundary = 20.5; // Bariyerin başladığı yerin hemen dışı (çarpma sınırı)
 
                 if (Math.abs(this.mesh.position.x) > roadBoundary) {
-                    // Şarampol üzerindeyse, yavaşlatıcı etki uygula
+                    // Yol sınırında veya dışında yavaşlatıcı etki uygula
                     this.speed *= (1 - 1.5 * deltaTime); 
-                    // Hız 0'ın altına düşmesin
                     this.speed = Math.max(0, this.speed);
                     
-                    // Şarampol dışına çıkarsa (Çevre çarpması)
-                    if (Math.abs(this.mesh.position.x) > shoulderBoundary) {
+                    // Bariyer dışına çıkarsa (Çevre çarpması)
+                    if (Math.abs(this.mesh.position.x) > barrierBoundary) {
                         // Geri ışınlanma Game sınıfında yapılacak
                         this.mesh.userData.offRoadCollision = true;
                     } else {
@@ -379,15 +374,15 @@
                 this.ctx = this.canvas.getContext('2d');
                 this.width = this.canvas.width;
                 this.height = this.canvas.height;
-                this.trackExtents = trackExtents; // X ekseni için kullanıyoruz
+                this.trackExtents = trackExtents; 
                 
-                // Mini harita ölçeği: Sadece X ekseni konumu için ölçeklendiriyoruz
+                // Mini harita ölçeği: X ekseni [-25, 25] aralığına göre ayarlanır (Toplam 50 birim)
                 this.mapScale = this.width / (trackExtents.max - trackExtents.min); 
             }
             
             // 3D koordinatı 2D canvas koordinatına dönüştürür (Sadece X-ekseni için şerit takibi)
             worldToMap(x, z) {
-                // X koordinatını [0, 60] aralığına kaydır (-30'dan +30'a)
+                // X koordinatını [0, 50] aralığına kaydır (-25'ten +25'e)
                 const normalizedX = x - this.trackExtents.min;
                 
                 // X pozisyonunu yatay olarak harita üzerine yansıt (mapX)
@@ -402,7 +397,7 @@
             draw(playerPos, aiPositions) {
                 this.ctx.clearRect(0, 0, this.width, this.height);
                 
-                // 1. Otoyol Genişliği Çizimi (Şerit Görünümü)
+                // 1. Otoyol Genişliği Çizimi (Şerit Görünümü - X-ekseni)
                 this.ctx.fillStyle = '#1f2937'; // Gri arka plan
                 this.ctx.fillRect(0, 0, this.width, this.height);
                 
@@ -455,12 +450,11 @@
                 
                 document.getElementById('game-container').appendChild(this.renderer.domElement);
                 
-                // Düz yolda waypointler anlamsız, ancak AIController'ın ihtiyacı için uzak bir hedef tutuyoruz.
                 this.waypoints = [
                     new THREE.Vector3( 0, 0, 5000), 
                 ]; 
-                // Yol genişliği (-30'dan 30'a)
-                this.trackExtents = { min: -30, max: 30 }; 
+                // Yol genişliği X: -25 ile X: 25 arası (Harita çizimi için)
+                this.trackExtents = { min: -25, max: 25 }; 
                 this.setupScene();
                 window.addEventListener('resize', this.onWindowResize.bind(this));
             }
@@ -483,9 +477,9 @@
                 groundMesh.receiveShadow = true;
                 this.scene.add(groundMesh);
 
-                // 2. OTOYOL (ANA YOL)
+                // 2. OTOYOL (4 ŞERİTLİ ANA YOL)
                 const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 }); 
-                const roadWidth = 30; // Ana yol genişliği 30 birim
+                const roadWidth = 40; // Ana yol genişliği 40 birim (4 şerit için)
                 const trackLength = 10000; 
 
                 const roadGeometry = new THREE.BoxGeometry(roadWidth, 0.05, trackLength);
@@ -494,72 +488,72 @@
                 roadMesh.receiveShadow = true;
                 this.scene.add(roadMesh);
                 
-                // 3. ŞARAMPOL VE YAN ŞERİTLER (Omuz/Run-off Alanı)
-                const shoulderMaterial = new THREE.MeshStandardMaterial({ color: 0x555555 }); // Koyu gri/asfalt şarampol
-                const shoulderWidth = 15; // Her iki yandaki şarampol genişliği (15+30+15 = 60 toplam)
-
-                // Sol Şarampol (X: -15 - 7.5 = -22.5)
-                const shoulderLGeometry = new THREE.BoxGeometry(shoulderWidth, 0.05, trackLength);
-                const shoulderLMesh = new THREE.Mesh(shoulderLGeometry, shoulderMaterial);
-                shoulderLMesh.position.set(-roadWidth/2 - shoulderWidth/2, 0.05, trackLength / 2 - 5000); 
-                shoulderLMesh.receiveShadow = true;
-                this.scene.add(shoulderLMesh);
-
-                // Sağ Şarampol (X: 15 + 7.5 = 22.5)
-                const shoulderRGeometry = new THREE.BoxGeometry(shoulderWidth, 0.05, trackLength);
-                const shoulderRMesh = new THREE.Mesh(shoulderRGeometry, shoulderMaterial);
-                shoulderRMesh.position.set(roadWidth/2 + shoulderWidth/2, 0.05, trackLength / 2 - 5000); 
-                shoulderRMesh.receiveShadow = true;
-                this.scene.add(shoulderRMesh);
-
-
-                // Merkezi Kesintili Şeritler (Ana yolun ortasında)
+                // 3. Şerit Çizgileri (4 şerit için 3 kesintili çizgi)
                 const centerLineMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
+                const laneWidth = roadWidth / 4; // Her şerit 10 birim
                 const lineGap = 20;
                 const lineLength = 10;
                 const centerlineThickness = 0.5;
 
-                for (let i = -trackLength/2; i < trackLength/2; i += lineGap) {
-                    const line = new THREE.Mesh(new THREE.BoxGeometry(centerlineThickness, 0.07, lineLength), centerLineMaterial);
-                    line.position.set(0, 0.07, i); // Orta çizgi X=0
-                    this.scene.add(line);
+                // Çizgi Pozisyonları: -10, 0, 10
+                const linePositions = [-laneWidth, 0, laneWidth]; 
+
+                for (const xPos of linePositions) {
+                    for (let i = -trackLength/2; i < trackLength/2; i += lineGap) {
+                        const line = new THREE.Mesh(new THREE.BoxGeometry(centerlineThickness, 0.07, lineLength), centerLineMaterial);
+                        line.position.set(xPos, 0.07, i); // Orta çizgiler X=-10, X=0, X=10
+                        this.scene.add(line);
+                    }
                 }
-                
-                // Yol Sınır Çizgileri (Şarampolü yoldan ayıran sarı çizgiler)
+
+                // 4. Yol Sınır Çizgileri (Yolun en kenarları)
                 const boundaryLineMaterial = new THREE.MeshBasicMaterial({ color: 0xFFFF00 }); // Sarı çizgi
                 const boundaryThickness = 0.3;
+                const boundaryLinePositions = [-roadWidth/2, roadWidth/2]; // -20 ve 20
+
+                for (const xPos of boundaryLinePositions) {
+                    for (let i = -trackLength/2; i < trackLength/2; i += lineGap) {
+                        const line = new THREE.Mesh(new THREE.BoxGeometry(boundaryThickness, 0.07, lineLength), boundaryLineMaterial);
+                        line.position.set(xPos, 0.07, i);
+                        this.scene.add(line);
+                    }
+                }
                 
-                // Sol sınır (X=-15)
-                for (let i = -trackLength/2; i < trackLength/2; i += lineGap) {
-                    const line = new THREE.Mesh(new THREE.BoxGeometry(boundaryThickness, 0.07, lineLength), boundaryLineMaterial);
-                    line.position.set(-roadWidth/2, 0.07, i); // X = -15
-                    this.scene.add(line);
-                }
-                // Sağ sınır (X=15)
-                for (let i = -trackLength/2; i < trackLength/2; i += lineGap) {
-                    const line = new THREE.Mesh(new THREE.BoxGeometry(boundaryThickness, 0.07, lineLength), boundaryLineMaterial);
-                    line.position.set(roadWidth/2, 0.07, i); // X = 15
-                    this.scene.add(line);
-                }
+                // 5. GÜVENLİK BARİYERLERİ (Demirler)
+                const barrierGeometry = new THREE.BoxGeometry(0.5, 1.5, trackLength); // Yüksek ve ince
+                const barrierMaterial = new THREE.MeshStandardMaterial({ color: 0xAAAAAA }); // Gümüş gri
+                const barrierOffset = roadWidth / 2 + 0.25; // 20.25
+
+                // Sol Bariyer (X: -20.25)
+                const barrierLMesh = new THREE.Mesh(barrierGeometry, barrierMaterial);
+                barrierLMesh.position.set(-barrierOffset, 0.75, trackLength / 2 - 5000); 
+                this.scene.add(barrierLMesh);
+
+                // Sağ Bariyer (X: 20.25)
+                const barrierRMesh = new THREE.Mesh(barrierGeometry, barrierMaterial);
+                barrierRMesh.position.set(barrierOffset, 0.75, trackLength / 2 - 5000); 
+                this.scene.add(barrierRMesh);
+
 
                 // Basit Skybox (Gökyüzü)
                 this.scene.background = new THREE.Color(0x87ceeb);
                 
-                // Kamera Konumu
+                // Kamera Konumu (Başlangıç)
                 this.camera.position.set(0, 10, -20);
                 this.camera.lookAt(0, 0, 0);
             }
             
-            // Kamerayı araca takip ettir
+            // Kamerayı araca takip ettir (Kuş Bakışı)
             updateCamera(targetMesh) {
-                // Kamerayı aracın arkasına ve yukarısına yerleştir
-                const offset = new THREE.Vector3(0, 3, -8);
+                // KUŞ BAKIŞI KAMERA AYARI (Yüksek ve geride)
+                const offset = new THREE.Vector3(0, 15, -15); // Y: 15 birim yükseklik, Z: -15 birim geride
                 offset.applyQuaternion(targetMesh.quaternion);
 
                 const targetPosition = new THREE.Vector3().copy(targetMesh.position).add(offset);
                 this.camera.position.lerp(targetPosition, 0.1);
                 
-                const lookAtOffset = new THREE.Vector3(0, 1, 5);
+                // Biraz ilerideki bir noktaya bak
+                const lookAtOffset = new THREE.Vector3(0, 0, 5);
                 lookAtOffset.applyQuaternion(targetMesh.quaternion);
                 const lookAtPoint = new THREE.Vector3().copy(targetMesh.position).add(lookAtOffset);
 
@@ -567,11 +561,11 @@
             }
 
             getWaypoints() {
-                return this.waypoints; // AIController için tek bir uzak nokta
+                return this.waypoints; 
             }
             
             getTrackExtents() {
-                return this.trackExtents; // X-ekseni genişliği (-30'dan 30'a)
+                return this.trackExtents; 
             }
 
             onWindowResize() {
@@ -600,7 +594,6 @@
                 this.elapsedTime = 0;
             }
 
-            // Tur ve tur sayısı parametreleri kaldırıldı
             updateHUD(speed, maxSpeed, rpmRatio, gear, score) {
                 // Skor Güncelleme
                 this.scoreEl.textContent = score.toString(); 
@@ -683,12 +676,11 @@
                                 }
                             });
                             
-                            // Not: OBJ modellerin boyutu ve yönü değişkendir. 
-                            // Bu ayarlar kutu (2.5x1x5) boyutuna yaklaşmak ve ileri bakmasını sağlamak içindir.
-                            const scaleFactor = 0.5; 
+                            // YENİ KÜÇÜK ÖLÇEK
+                            const scaleFactor = 0.3; 
                             object.scale.set(scaleFactor, scaleFactor, scaleFactor);
                             object.rotation.y = Math.PI; // Modelin Z ekseninde ileri bakması için 180 derece döndür.
-                            object.position.y = -0.5; // Mesh'in tabanını y=0.6'ya oturtmak için
+                            object.position.y = -0.3; // Mesh'in tabanını yeni y=0.3'e oturtmak için
                             
                             this.carModelGroup = object;
                             console.log("3D Araba Modeli Yüklendi:", modelPath);
@@ -716,19 +708,19 @@
                 this.physics.init(); 
                 const waypoints = this.sceneManager.getWaypoints();
 
-                // 1. Oyuncu Aracını Oluştur (Mavi - Orta Şerit)
-                // Yüklü modeli Vehicle'a geç
-                this.playerVehicle = new Vehicle(this.sceneManager.scene, 0x00aaff, new THREE.Vector3(0, 0.6, 0), 'player', this.carModelGroup); 
+                // 1. Oyuncu Aracını Oluştur (Mavi - 4 şeritli yolun 3. şeridi)
+                // Şerit pozisyonları: -15, -5, 5, 15
+                this.playerVehicle = new Vehicle(this.sceneManager.scene, 0x00aaff, new THREE.Vector3(5, 0.3, 0), 'player', this.carModelGroup); 
                 this.sceneManager.camera.lookAt(this.playerVehicle.mesh.position);
                 
-                // 2. AI Rakipleri Oluştur (Farklı Şeritler)
+                // 2. AI Rakipleri Oluştur
                 this.createAIOpponents(waypoints, this.carModelGroup);
                 
                 // 3. Mini Haritayı Başlat
                 this.minimap = new Minimap('minimap-canvas', this.sceneManager.getTrackExtents());
 
                 this.isGameRunning = true;
-                this.uiManager.showMessage("Sonsuz Otoyol! Puan Kazanmak İçin Sollama Yap!", 3000);
+                this.uiManager.showMessage("Dört Şeritli Otoyol! Sollama Yap ve Puan Kazan!", 3000);
                 console.log("Oyun Başlatıldı (Sonsuz Otoyol Modu).");
 
                 // Ana oyun döngüsünü başlat
@@ -737,21 +729,24 @@
             
             // carModelGroup parametresini ekle
             createAIOpponents(waypoints, carModelGroup) {
-                // Not: Yeni yol genişliği X: -15 ile X: 15 arasındadır.
+                // 4 Şerit Pozisyonları: -15 (En Sol), -5, 5 (Oyuncununki), 15 (En Sağ)
                 
-                // AI 1 (Kolay - Mor - Sağ Şerit)
-                const aiVehicle1 = new Vehicle(this.sceneManager.scene, 0xAA00AA, new THREE.Vector3(7.5, 0.6, 100), 'ai-1', carModelGroup); 
-                const aiController1 = new AIController(aiVehicle1, waypoints, 0.6); 
+                // AI 1 (Kolay - Mor - En Sol Şerit: -15)
+                const aiVehicle1 = new Vehicle(this.sceneManager.scene, 0xAA00AA, new THREE.Vector3(-15, 0.3, 100), 'ai-1', carModelGroup); 
+                // Difficulty 0.9: Daha yavaş ve düz gitmeye odaklı
+                const aiController1 = new AIController(aiVehicle1, waypoints, 0.9); 
                 this.aiControllers.push(aiController1);
 
-                // AI 2 (Orta - Yeşil - Sol Şerit)
-                const aiVehicle2 = new Vehicle(this.sceneManager.scene, 0x00FF00, new THREE.Vector3(-7.5, 0.6, 200), 'ai-2', carModelGroup);
-                const aiController2 = new AIController(aiVehicle2, waypoints, 1.0); 
+                // AI 2 (Orta - Yeşil - İkinci Şerit: -5)
+                const aiVehicle2 = new Vehicle(this.sceneManager.scene, 0x00FF00, new THREE.Vector3(-5, 0.3, 200), 'ai-2', carModelGroup);
+                // Difficulty 1.1: Biraz daha hızlı ve düz
+                const aiController2 = new AIController(aiVehicle2, waypoints, 1.1); 
                 this.aiControllers.push(aiController2);
                 
-                // Yeni AI 3 (Zor - Kırmızı - Orta Şerit)
-                const aiVehicle3 = new Vehicle(this.sceneManager.scene, 0xFF0000, new THREE.Vector3(0, 0.6, 350), 'ai-3', carModelGroup);
-                const aiController3 = new AIController(aiVehicle3, waypoints, 1.2); 
+                // Yeni AI 3 (Zor - Kırmızı - En Sağ Şerit: 15)
+                const aiVehicle3 = new Vehicle(this.sceneManager.scene, 0xFF0000, new THREE.Vector3(15, 0.3, 350), 'ai-3', carModelGroup);
+                // Difficulty 1.3: En hızlı ve en düz
+                const aiController3 = new AIController(aiVehicle3, waypoints, 1.3); 
                 this.aiControllers.push(aiController3);
             }
 
@@ -760,19 +755,19 @@
              */
             checkCollisions() {
                 const playerPos = this.playerVehicle.mesh.position;
-                // Kutu geometrisi veya OBJ modelinin etki alanı olarak hala 2.5x5'lik boyutları kullanıyoruz.
-                const playerBox = { width: 2.5, length: 5 }; 
+                // YENİ KÜÇÜK ÇARPIŞMA KUTUSU: 1.5 genişlik, 3.0 uzunluk
+                const playerBox = { width: 1.5, length: 3.0 }; 
 
                 // 1. AI Çarpışma Kontrolü
                 for (const aiController of this.aiControllers) {
                     const aiPos = aiController.vehicle.mesh.position;
-                    const aiBox = { width: 2.5, length: 5 }; 
+                    const aiBox = { width: 1.5, length: 3.0 }; 
                     
                     // Basit AABB (Axis-Aligned Bounding Box) kontrolü
                     // X ekseninde çarpışma (Yatay)
-                    const collisionX = Math.abs(playerPos.x - aiPos.x) < (playerBox.width / 2 + aiBox.width / 2); // 2.5
+                    const collisionX = Math.abs(playerPos.x - aiPos.x) < (playerBox.width / 2 + aiBox.width / 2); // 1.5
                     // Z ekseninde çarpışma (Dikey/İleri)
-                    const collisionZ = Math.abs(playerPos.z - aiPos.z) < (playerBox.length / 2 + aiBox.length / 2); // 5.0
+                    const collisionZ = Math.abs(playerPos.z - aiPos.z) < (playerBox.length / 2 + aiBox.length / 2); // 3.0
                     
                     if (collisionX && collisionZ) {
                         // Çarpışma tespit edildi!
@@ -781,9 +776,9 @@
                     }
                 }
                 
-                // 2. Çevre Çarpışma Kontrolü (Şarampol Dışı)
+                // 2. Çevre Çarpışma Kontrolü (Bariyer)
                 if (this.playerVehicle.mesh.userData.offRoadCollision) {
-                    this.handleCollision("Yol dışı çarpma");
+                    this.handleCollision("Bariyer çarpması");
                 }
             }
 
@@ -797,15 +792,16 @@
                 console.log(`Çarpışma: ${reason}. Oyuncu ışınlanıyor.`);
                 this.isGameRunning = false; // Kısa süreliğine oyunu durdur
                 
-                // 1. Işınlanma (Spawn noktası)
-                this.playerVehicle.mesh.position.set(0, 0.6, 0);
+                // 1. Işınlanma (Oyuncuyu Lane 3'e ışınla)
+                this.playerVehicle.mesh.position.set(5, 0.3, 0); 
                 this.playerVehicle.speed = 0;
                 this.playerVehicle.steeringAngle = 0;
                 
                 // AI'ları da oyuncu ile çakışmayacakları bir yere ışınla
-                this.aiControllers.forEach(controller => {
-                    // AI'ları da Z=0'dan biraz uzağa ve farklı şeritlere koy
-                    controller.vehicle.mesh.position.z = Math.random() * 100 + 50; 
+                this.aiControllers.forEach((controller, index) => {
+                    // AI'ları kendi şeritlerine ve Z=0'dan biraz uzağa koy
+                    const initialX = [ -15, -5, 15 ][index]; // AI'ların başlangıç X pozisyonları
+                    controller.vehicle.mesh.position.set(initialX, 0.3, Math.random() * 100 + 50); 
                     controller.vehicle.speed = 0;
                 });
 
@@ -829,7 +825,7 @@
                     
                     // Sollama kontrolü
                     const isAhead = playerPos.z > aiPos.z + 5;
-                    const isLatallyClose = Math.abs(playerPos.x - aiPos.x) < 30; // 60 birimlik pist genişliği (yol+şarampol)
+                    const isLatallyClose = Math.abs(playerPos.x - aiPos.x) < 40; // Geniş yolun sınırları içinde
 
                     if (isAhead && isLatallyClose && !aiController.isOvertaken) {
                         this.score += 100;
@@ -837,7 +833,7 @@
                         this.uiManager.showMessage(`+100 Puan! Rakip ${aiController.vehicle.id} Sollanmıştır!`, 1500);
                     }
                     
-                    // Oyuncu araçtan 100 birimden fazla uzaklaştıysa, sollama durumunu sıfırla (tekrar sollama puanı verilebilir)
+                    // Oyuncu araçtan 100 birimden fazla uzaklaştıysa, sollama durumunu sıfırla
                     if (playerPos.z > aiPos.z + 100) {
                          aiController.isOvertaken = false;
                     }
@@ -894,7 +890,6 @@
                     rotation: this.playerVehicle.mesh.quaternion 
                 };
                 const aiMapPositions = this.aiControllers.map(c => c.vehicle.mesh.position);
-                // Düz yolda waypointler gösterilmiyor, sadece araç konumları
                 this.minimap.draw(playerMapData, aiMapPositions, this.sceneManager.getWaypoints());
 
 
